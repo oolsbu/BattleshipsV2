@@ -5,34 +5,27 @@
 #include "config.h"
 #include "game/state.h"
 #include "display/led_matrix.h"
+#include "roles/master.h"
+#include "roles/slave.h"
+#include "comms/connect.h"
 
-GamePhase game_phase = PHASE_PLACING;
 
-GameState game_state;
+GamePhase game_phase = PHASE_INIT;
+
+User role = User::Master;
 
 void setup() {
   Serial.begin(115200);
   ledSetup();
+  ESPNOW_setup();
 }
 
 void loop() {
-  if(game_phase == PHASE_PLACING) {
-    if (game_state.my_ships_placed == SHIPS) {
-      
-      game_phase = PHASE_WAITING;
-    }
-  } else if(game_phase == PHASE_PAIRING) {
+  if (role == User::Master) {
+    masterLoop(game_phase);
   }
-  else if(game_phase == PHASE_WAITING) {
-  }
-  else if(game_phase == PHASE_SHOOTING) {
-  }
-  else if(game_phase == PHASE_GAMEOVER) {
+  else {
+    // slaveLoop(game_phase, game_state);
   }
   
-}
-
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
 }
