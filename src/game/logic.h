@@ -7,5 +7,7 @@ void placeBoats(
     uint8_t &ships_left,
     uint8_t &cursor_x,
     uint8_t &cursor_y,
+    int &joyBtn,
+    int &btn,
     bool &placing_horizontal
 );

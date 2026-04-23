@@ -1,23 +1,30 @@
+#include "protocol.h"
+#include "roles/master.h"
+#include "roles/slave.h"
 #include <ESP8266WiFi.h>
 #include <espnow.h>
 
+extern User role;
 
 //My adress: 0x24, 0x6F, 0x28, 0x11, 0x22, 0x33
 uint8_t peerAddress[] = {0x24, 0x6F, 0x28, 0x11, 0x22, 0x33};
 
-typedef struct {
-  uint8_t value;
-} Message;
-
-Message msg;
+bool sendRaw(const uint8_t* data, uint8_t len) {
+  return esp_now_send(peerAddress, const_cast<uint8_t*>(data), len) == 0;
+}
 
 // Called when data is received
 void onReceive(uint8_t *mac, uint8_t *incomingData, uint8_t len) {
-  memcpy(&msg, incomingData, sizeof(msg));
-    Serial.print("Bytes received: ");
-    Serial.println(len);
-    Serial.print("Value: ");
-    Serial.println(msg.value);
+  if (len < sizeof(MessageHeader)) {
+    return;
+  }
+
+  if (role == User::Master) {
+    masterRecievedMessage(incomingData, len);
+  }
+  else {
+    slaveRecievedMessage(incomingData, len);
+  }
 }
 
 // Called when data is sent
@@ -41,7 +48,3 @@ void ESPNOW_setup() {
   esp_now_add_peer(peerAddress, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
 }
 
-void sendMessage(uint8_t value) {
-  msg.value = value;
-  esp_now_send(peerAddress, (uint8_t *) &msg, sizeof(msg));
-}

@@ -30,12 +30,15 @@ inline int XY(int x, int y) {
 
 
 
-inline void showFrame(const Cell frame[BOARD_SIZE][BOARD_SIZE], bool myBoard) {
+inline void showFrame(const Cell frame[BOARD_SIZE][BOARD_SIZE], bool myBoard, bool showCursor = false, uint8_t cursorX = 0, uint8_t cursorY = 0) {
   FastLED.clear();
   for (uint8_t y = 0; y < BOARD_SIZE; y++) {
     for (uint8_t x = 0; x < BOARD_SIZE; x++) {
       leds[XY(BOARD_OFFSET_X + x, BOARD_OFFSET_Y + y)] = cellColor(frame[x][y], myBoard);
     }
+  }
+  if (showCursor) {
+    leds[XY(BOARD_OFFSET_X + cursorX, BOARD_OFFSET_Y + cursorY)] = CRGB::Yellow;
   }
   FastLED.show();
 }
