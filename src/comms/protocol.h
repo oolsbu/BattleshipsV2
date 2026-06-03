@@ -8,7 +8,9 @@ enum MessageType : uint8_t
     MSG_AIM,
     MSG_SHOOT,
     MSG_GAME_STATE,
-    MSG_SHIP_REVEAL
+    MSG_SHIP_REVEAL,
+    MSG_POWER_SHOOT,
+    MSG_POWER_STATE
 };
 
 #define MAX_SHIPS_IN_REVEAL 8
@@ -43,6 +45,7 @@ struct __attribute__((packed)) AimPayload
 {
     uint8_t x;
     uint8_t y;
+    uint8_t powerup_active;
 };
 
 struct __attribute__((packed)) AimMessage
@@ -93,4 +96,29 @@ struct __attribute__((packed)) ShipRevealMessage
     MessageHeader header;
     uint8_t count;
     ShipRevealEntry ships[MAX_SHIPS_IN_REVEAL];
+};
+
+struct __attribute__((packed)) PowerShootMessage
+{
+    MessageHeader header;
+    uint8_t x;
+    uint8_t y;
+};
+
+struct __attribute__((packed)) PowerStateEntry
+{
+    uint8_t x;
+    uint8_t y;
+    uint8_t result;
+};
+
+struct __attribute__((packed)) PowerStateMessage
+{
+    MessageHeader header;
+    uint8_t shooter;
+    uint8_t master_turn;
+    uint8_t master_ships_left;
+    uint8_t slave_ships_left;
+    uint8_t count;
+    PowerStateEntry results[9];
 };

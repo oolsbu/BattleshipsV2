@@ -13,13 +13,17 @@ static uint8_t last_aim_y = 0;
 static unsigned long last_ready_ms = 0;
 static bool shot_pending = false; // waiting for game state response after sending MSG_SHOOT
 static bool animation_done = false;
+static bool powerup_available = true;
+static bool powerup_active = false;
+static bool master_powerup_aiming = false;
 
-static bool sendAim(uint8_t x, uint8_t y)
+static bool sendAim(uint8_t x, uint8_t y, bool powerup = false)
 {
     AimMessage msg = {};
     msg.header.type = MSG_AIM;
     msg.payload.x = x;
     msg.payload.y = y;
+    msg.payload.powerup_active = powerup ? 1 : 0;
     return sendRaw(reinterpret_cast<const uint8_t *>(&msg), sizeof(msg));
 }
 
@@ -29,6 +33,15 @@ static bool sendShoot(uint8_t x, uint8_t y)
     msg.header.type = MSG_SHOOT;
     msg.payload.x = x;
     msg.payload.y = y;
+    return sendRaw(reinterpret_cast<const uint8_t *>(&msg), sizeof(msg));
+}
+
+static bool sendPowerShoot(uint8_t x, uint8_t y)
+{
+    PowerShootMessage msg = {};
+    msg.header.type = MSG_POWER_SHOOT;
+    msg.x = x;
+    msg.y = y;
     return sendRaw(reinterpret_cast<const uint8_t *>(&msg), sizeof(msg));
 }
 
@@ -62,6 +75,9 @@ void slaveSetup()
     last_ready_ms = 0;
     shot_pending = false;
     animation_done = false;
+    powerup_available = true;
+    powerup_active = false;
+    master_powerup_aiming = false;
     for (uint8_t i = 0; i < SHIPS; ++i)
     {
         game_state.slave_ships[i] = {};
@@ -168,11 +184,16 @@ void slaveLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
         }
         if (!game_state.master_turn)
         {
+            if (joyBtn && powerup_available)
+            {
+                powerup_active = !powerup_active;
+                has_last_aim = false;
+            }
             game_state.slave_cursor_x = clampIndex(static_cast<int>(game_state.slave_cursor_x) + dx, 0, BOARD_SIZE - 1);
             game_state.slave_cursor_y = clampIndex(static_cast<int>(game_state.slave_cursor_y) + dy, 0, BOARD_SIZE - 1);
             if (SHOW_OPPONENT_AIM && (!has_last_aim || last_aim_x != game_state.slave_cursor_x || last_aim_y != game_state.slave_cursor_y))
             {
-                sendAim(game_state.slave_cursor_x, game_state.slave_cursor_y);
+                sendAim(game_state.slave_cursor_x, game_state.slave_cursor_y, powerup_active);
                 last_aim_x = game_state.slave_cursor_x;
                 last_aim_y = game_state.slave_cursor_y;
                 has_last_aim = true;
@@ -184,14 +205,40 @@ void slaveLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
             }
             if (btn && !shot_pending)
             {
-                sendShoot(game_state.slave_cursor_x, game_state.slave_cursor_y);
-                shot_pending = true;
+                if (powerup_active)
+                {
+                    bool any_valid = false;
+                    for (int sy = -1; sy <= 1 && !any_valid; sy++)
+                        for (int sx = -1; sx <= 1 && !any_valid; sx++)
+                        {
+                            int tx = (int)game_state.slave_cursor_x + sx;
+                            int ty = (int)game_state.slave_cursor_y + sy;
+                            if (tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE)
+                            {
+                                Cell c = game_state.master_board[ty][tx];
+                                if (c == CELL_EMPTY || c == CELL_SHIP)
+                                    any_valid = true;
+                            }
+                        }
+                    if (any_valid)
+                    {
+                        sendPowerShoot(game_state.slave_cursor_x, game_state.slave_cursor_y);
+                        shot_pending = true;
+                        powerup_available = false;
+                        powerup_active = false;
+                    }
+                }
+                else
+                {
+                    sendShoot(game_state.slave_cursor_x, game_state.slave_cursor_y);
+                    shot_pending = true;
+                }
             }
-            showFrame(game_state.master_board, false, true, game_state.slave_cursor_x, game_state.slave_cursor_y);
+            showFrame(game_state.master_board, false, true, game_state.slave_cursor_x, game_state.slave_cursor_y, 0, true, true, powerup_available, powerup_active);
         }
         else
         {
-            showFrame(game_state.slave_board, true, SHOW_OPPONENT_AIM, game_state.master_cursor_x, game_state.master_cursor_y);
+            showFrame(game_state.slave_board, true, SHOW_OPPONENT_AIM, game_state.master_cursor_x, game_state.master_cursor_y, 0, true, true, powerup_available, master_powerup_aiming);
         }
         break;
     case PHASE_WON:
@@ -223,6 +270,7 @@ void slaveRecievedMessage(uint8_t *incomingData, uint8_t len)
             game_state.master_cursor_x = msg->payload.x;
         if (msg->payload.y < BOARD_SIZE)
             game_state.master_cursor_y = msg->payload.y;
+        master_powerup_aiming = (msg->payload.powerup_active != 0);
         break;
     }
     case MSG_GAME_STATE:
@@ -257,6 +305,36 @@ void slaveRecievedMessage(uint8_t *incomingData, uint8_t len)
             }
         }
         start_received = true;
+        break;
+    }
+    case MSG_POWER_STATE:
+    {
+        if (len < static_cast<uint8_t>(sizeof(PowerStateMessage)))
+            return;
+        const PowerStateMessage *msg = reinterpret_cast<const PowerStateMessage *>(incomingData);
+        game_state.master_turn = msg->master_turn != 0;
+        game_state.master_ships_left = msg->master_ships_left;
+        game_state.slave_ships_left = msg->slave_ships_left;
+        shot_pending = false;
+        bool update_slave = (msg->shooter == static_cast<uint8_t>(User::Master));
+        for (uint8_t i = 0; i < msg->count && i < 9; i++)
+        {
+            uint8_t x = msg->results[i].x;
+            uint8_t y = msg->results[i].y;
+            Cell result = static_cast<Cell>(msg->results[i].result);
+            if (x < BOARD_SIZE && y < BOARD_SIZE)
+            {
+                if (update_slave)
+                    game_state.slave_board[y][x] = result;
+                else
+                    game_state.master_board[y][x] = result;
+            }
+        }
+        if (update_slave)
+            showFrame(game_state.slave_board, true, false);
+        else
+            showFrame(game_state.master_board, false, false);
+        delay(1000);
         break;
     }
     case MSG_SHIP_REVEAL:

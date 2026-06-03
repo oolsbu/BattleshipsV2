@@ -22,7 +22,8 @@ int XY(int x, int y)
 }
 
 void showFrame(const Cell frame[BOARD_SIZE][BOARD_SIZE], bool myBoard, bool showCursor, uint8_t cursorX, uint8_t cursorY,
-               uint8_t previewLength, bool previewHorizontal, bool previewValid)
+               uint8_t previewLength, bool previewHorizontal, bool previewValid,
+               bool powerupAvailable, bool powerupActive)
 {
     static CRGB lastFrame[NUM_LEDS];
     static bool hasLastFrame = false;
@@ -75,9 +76,27 @@ void showFrame(const Cell frame[BOARD_SIZE][BOARD_SIZE], bool myBoard, bool show
             }
         }
     }
+    if (powerupAvailable)
+    {
+        leds[XY(0, 0)] = CRGB(220, 0, 0);
+    }
     if (showCursor)
     {
-        leds[XY(BOARD_OFFSET_X + cursorX, BOARD_OFFSET_Y + cursorY)] = CRGB::Yellow;
+        if (powerupActive)
+        {
+            for (int cy = -1; cy <= 1; cy++)
+                for (int cx = -1; cx <= 1; cx++)
+                {
+                    int tx = (int)cursorX + cx;
+                    int ty = (int)cursorY + cy;
+                    if (tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE)
+                        leds[XY(BOARD_OFFSET_X + tx, BOARD_OFFSET_Y + ty)] = CRGB::Yellow;
+                }
+        }
+        else
+        {
+            leds[XY(BOARD_OFFSET_X + cursorX, BOARD_OFFSET_Y + cursorY)] = CRGB::Yellow;
+        }
     }
 
     bool changed = !hasLastFrame;

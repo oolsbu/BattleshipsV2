@@ -9,17 +9,21 @@ static bool slave_ready = false;
 static bool start_sent = false;
 static bool has_last_aim = false;
 static bool animation_done = false;
+static bool powerup_available = true;
+static bool powerup_active = false;
+static bool slave_powerup_aiming = false;
 static uint8_t last_aim_x = 0;
 static uint8_t last_aim_y = 0;
 
 static Cell shoot(User user, uint8_t y, uint8_t x);
 
-static bool sendAim(uint8_t x, uint8_t y)
+static bool sendAim(uint8_t x, uint8_t y, bool powerup = false)
 {
     AimMessage msg = {};
     msg.header.type = MSG_AIM;
     msg.payload.x = x;
     msg.payload.y = y;
+    msg.payload.powerup_active = powerup ? 1 : 0;
     return sendRaw(reinterpret_cast<const uint8_t *>(&msg), sizeof(msg));
 }
 
@@ -81,6 +85,9 @@ void masterSetup()
     start_sent = false;
     has_last_aim = false;
     animation_done = false;
+    powerup_available = true;
+    powerup_active = false;
+    slave_powerup_aiming = false;
     for (uint8_t i = 0; i < SHIPS; ++i)
     {
         game_state.master_ships[i] = {};
@@ -191,11 +198,16 @@ void masterLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
         }
         if (game_state.master_turn)
         {
+            if (joyBtn && powerup_available)
+            {
+                powerup_active = !powerup_active;
+                has_last_aim = false;
+            }
             game_state.master_cursor_x = clampIndex(static_cast<int>(game_state.master_cursor_x) + dx, 0, BOARD_SIZE - 1);
             game_state.master_cursor_y = clampIndex(static_cast<int>(game_state.master_cursor_y) + dy, 0, BOARD_SIZE - 1);
             if (SHOW_OPPONENT_AIM && (!has_last_aim || last_aim_x != game_state.master_cursor_x || last_aim_y != game_state.master_cursor_y))
             {
-                sendAim(game_state.master_cursor_x, game_state.master_cursor_y);
+                sendAim(game_state.master_cursor_x, game_state.master_cursor_y, powerup_active);
                 last_aim_x = game_state.master_cursor_x;
                 last_aim_y = game_state.master_cursor_y;
                 has_last_aim = true;
@@ -207,22 +219,76 @@ void masterLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
             }
             if (btn)
             {
-                Cell result = shoot(User::Master, game_state.master_cursor_y, game_state.master_cursor_x);
-                if (result != CELL_ALREADY_TARGETED)
+                if (powerup_active)
                 {
-                    game_state.slave_board[game_state.master_cursor_y][game_state.master_cursor_x] = result;
-                    showFrame(game_state.slave_board, false, false); // show result without cursor
-                    delay(1000);
-                    game_state.master_turn = false;
-                    sendGameState(static_cast<uint8_t>(User::Master), game_state.master_cursor_x, game_state.master_cursor_y, static_cast<uint8_t>(result));
+                    bool any_valid = false;
+                    for (int sy = -1; sy <= 1 && !any_valid; sy++)
+                        for (int sx = -1; sx <= 1 && !any_valid; sx++)
+                        {
+                            int tx = (int)game_state.master_cursor_x + sx;
+                            int ty = (int)game_state.master_cursor_y + sy;
+                            if (tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE)
+                            {
+                                Cell c = game_state.slave_board[ty][tx];
+                                if (c == CELL_EMPTY || c == CELL_SHIP)
+                                    any_valid = true;
+                            }
+                        }
+                    if (any_valid)
+                    {
+                        PowerStateMessage psmsg = {};
+                        psmsg.header.type = MSG_POWER_STATE;
+                        psmsg.shooter = static_cast<uint8_t>(User::Master);
+                        uint8_t pcount = 0;
+                        for (int sy = -1; sy <= 1; sy++)
+                            for (int sx = -1; sx <= 1; sx++)
+                            {
+                                int tx = (int)game_state.master_cursor_x + sx;
+                                int ty = (int)game_state.master_cursor_y + sy;
+                                if (tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE)
+                                {
+                                    Cell result = shoot(User::Master, ty, tx);
+                                    if (result != CELL_ALREADY_TARGETED)
+                                    {
+                                        game_state.slave_board[ty][tx] = result;
+                                        psmsg.results[pcount].x = static_cast<uint8_t>(tx);
+                                        psmsg.results[pcount].y = static_cast<uint8_t>(ty);
+                                        psmsg.results[pcount].result = static_cast<uint8_t>(result);
+                                        pcount++;
+                                    }
+                                }
+                            }
+                        game_state.master_turn = false;
+                        powerup_available = false;
+                        powerup_active = false;
+                        psmsg.master_turn = 0;
+                        psmsg.master_ships_left = game_state.master_ships_left;
+                        psmsg.slave_ships_left = game_state.slave_ships_left;
+                        psmsg.count = pcount;
+                        showFrame(game_state.slave_board, false, false, 0, 0, 0, true, true, powerup_available, false);
+                        delay(1000);
+                        sendRaw(reinterpret_cast<const uint8_t *>(&psmsg), sizeof(psmsg));
+                    }
                 }
-                Serial.println(result);
+                else
+                {
+                    Cell result = shoot(User::Master, game_state.master_cursor_y, game_state.master_cursor_x);
+                    if (result != CELL_ALREADY_TARGETED)
+                    {
+                        game_state.slave_board[game_state.master_cursor_y][game_state.master_cursor_x] = result;
+                        showFrame(game_state.slave_board, false, false, 0, 0, 0, true, true, powerup_available, false);
+                        delay(1000);
+                        game_state.master_turn = false;
+                        sendGameState(static_cast<uint8_t>(User::Master), game_state.master_cursor_x, game_state.master_cursor_y, static_cast<uint8_t>(result));
+                    }
+                    Serial.println(result);
+                }
             }
-            showFrame(game_state.slave_board, false, true, game_state.master_cursor_x, game_state.master_cursor_y);
+            showFrame(game_state.slave_board, false, true, game_state.master_cursor_x, game_state.master_cursor_y, 0, true, true, powerup_available, powerup_active);
         }
         else
         {
-            showFrame(game_state.master_board, true, SHOW_OPPONENT_AIM, game_state.slave_cursor_x, game_state.slave_cursor_y);
+            showFrame(game_state.master_board, true, SHOW_OPPONENT_AIM, game_state.slave_cursor_x, game_state.slave_cursor_y, 0, true, true, powerup_available, slave_powerup_aiming);
         }
         break;
     case PHASE_WON:
@@ -288,6 +354,7 @@ void masterRecievedMessage(uint8_t *incomingData, uint8_t len)
             game_state.slave_cursor_x = msg->payload.x;
         if (msg->payload.y < BOARD_SIZE)
             game_state.slave_cursor_y = msg->payload.y;
+        slave_powerup_aiming = (msg->payload.powerup_active != 0);
         break;
     }
     case MSG_SHOOT:
@@ -305,6 +372,59 @@ void masterRecievedMessage(uint8_t *incomingData, uint8_t len)
             game_state.master_turn = true;
             sendGameState(static_cast<uint8_t>(User::Slave), msg->payload.x, msg->payload.y, static_cast<uint8_t>(result));
         }
+        break;
+    }
+    case MSG_POWER_SHOOT:
+    {
+        if (len < static_cast<uint8_t>(sizeof(PowerShootMessage)))
+            return;
+        if (game_state.master_turn)
+            return;
+        const PowerShootMessage *msg = reinterpret_cast<const PowerShootMessage *>(incomingData);
+        uint8_t cx = msg->x;
+        uint8_t cy = msg->y;
+        bool any_valid = false;
+        for (int sy = -1; sy <= 1 && !any_valid; sy++)
+            for (int sx = -1; sx <= 1 && !any_valid; sx++)
+            {
+                int tx = (int)cx + sx;
+                int ty = (int)cy + sy;
+                if (tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE)
+                {
+                    Cell c = game_state.master_board[ty][tx];
+                    if (c == CELL_EMPTY || c == CELL_SHIP)
+                        any_valid = true;
+                }
+            }
+        if (!any_valid)
+            return;
+        PowerStateMessage psmsg = {};
+        psmsg.header.type = MSG_POWER_STATE;
+        psmsg.shooter = static_cast<uint8_t>(User::Slave);
+        uint8_t pcount = 0;
+        for (int sy = -1; sy <= 1; sy++)
+            for (int sx = -1; sx <= 1; sx++)
+            {
+                int tx = (int)cx + sx;
+                int ty = (int)cy + sy;
+                if (tx >= 0 && tx < BOARD_SIZE && ty >= 0 && ty < BOARD_SIZE)
+                {
+                    Cell result = shoot(User::Slave, ty, tx);
+                    if (result != CELL_ALREADY_TARGETED)
+                    {
+                        psmsg.results[pcount].x = static_cast<uint8_t>(tx);
+                        psmsg.results[pcount].y = static_cast<uint8_t>(ty);
+                        psmsg.results[pcount].result = static_cast<uint8_t>(result);
+                        pcount++;
+                    }
+                }
+            }
+        game_state.master_turn = true;
+        psmsg.master_turn = 1;
+        psmsg.master_ships_left = game_state.master_ships_left;
+        psmsg.slave_ships_left = game_state.slave_ships_left;
+        psmsg.count = pcount;
+        sendRaw(reinterpret_cast<const uint8_t *>(&psmsg), sizeof(psmsg));
         break;
     }
     default:
