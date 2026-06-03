@@ -22,11 +22,11 @@ extern uint8_t other[6];
 #define BOARD_OFFSET_X ((16 - BOARD_SIZE) / 2)
 #define BOARD_OFFSET_Y ((16 - BOARD_SIZE) / 2)
 
-#define LED_PIN 5
+#define LED_PIN 12
 #define JOY_X_PIN 36
 #define JOY_Y_PIN 39
-#define JOY_SW_PIN 4
-#define BTN_PIN 2
+#define JOY_SW_PIN 14
+#define BTN_PIN 32
 #define ADC_MAX 4095
 #define JOY_LOW_THRESHOLD 1000
 #define JOY_HIGH_THRESHOLD 3000

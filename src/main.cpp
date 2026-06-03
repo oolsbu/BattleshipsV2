@@ -23,7 +23,7 @@ void setup()
 #endif
   ledSetup();
   ESPNOW_setup();
-  pinMode(BTN_PIN, INPUT);
+  pinMode(BTN_PIN, INPUT_PULLUP);
   pinMode(JOY_SW_PIN, INPUT_PULLUP);
 }
 

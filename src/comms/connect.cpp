@@ -12,7 +12,6 @@
 #include <WiFi.h>
 #include <esp_now.h>
 #include <esp_wifi.h>
-#include <cstring>
 
 bool sendRaw(const uint8_t *data, uint8_t len)
 {

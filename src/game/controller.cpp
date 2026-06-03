@@ -8,9 +8,6 @@ void getReadings(int &dx, int &dy, int &joyBtn, int &button)
     int valueX = analogRead(JOY_X_PIN);
     int valueY = analogRead(JOY_Y_PIN);
 
-    dx = 0;
-    dy = 0;
-
     int nextDx = 0;
     int nextDy = 0;
 
@@ -24,23 +21,26 @@ void getReadings(int &dx, int &dy, int &joyBtn, int &button)
     else if (valueY > JOY_HIGH_THRESHOLD)
         nextDy = -1;
 
-    bool nextButton = digitalRead(BTN_PIN) == HIGH;
     bool nextJoyBtn = digitalRead(JOY_SW_PIN) == LOW;
+    bool nextButton = digitalRead(BTN_PIN) == LOW;
 
     unsigned long now = millis();
-    bool hasInput = (nextDx != 0 || nextDy != 0 || nextButton || nextJoyBtn);
+    bool hasMove = (nextDx != 0 || nextDy != 0);
+    bool hasInput = (hasMove || nextJoyBtn || nextButton);
 
     if (hasInput && (now - lastInputMs >= INPUT_DEBOUNCE_MS))
     {
-        dx = nextDx;
-        dy = nextDy;
-        button = nextButton ? 1 : 0;
+        dx = hasMove ? nextDx : 0;
+        dy = hasMove ? nextDy : 0;
         joyBtn = nextJoyBtn ? 1 : 0;
+        button = nextButton ? 1 : 0;
         lastInputMs = now;
     }
     else
     {
-        button = 0;
+        dx = 0;
+        dy = 0;
         joyBtn = 0;
+        button = 0;
     }
 }
