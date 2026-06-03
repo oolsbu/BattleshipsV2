@@ -100,3 +100,63 @@ void showFrame(const Cell frame[BOARD_SIZE][BOARD_SIZE], bool myBoard, bool show
         hasLastFrame = true;
     }
 }
+
+void showEndAnimation(bool won, const Cell opponentBoard[BOARD_SIZE][BOARD_SIZE])
+{
+    // Perimeter path clockwise: top → right → bottom → left (60 pixels total)
+    const int PERIM = 60;
+    uint8_t px[60], py[60];
+    int idx = 0;
+    for (int x = 0; x < 16; x++) { px[idx] = x; py[idx] = 0; idx++; }
+    for (int y = 1; y < 16; y++) { px[idx] = 15; py[idx] = y; idx++; }
+    for (int x = 14; x >= 0; x--) { px[idx] = x; py[idx] = 15; idx++; }
+    for (int y = 14; y >= 1; y--) { px[idx] = 0; py[idx] = y; idx++; }
+
+    CRGB headColor = won ? CRGB(0, 220, 0) : CRGB(220, 0, 0);
+    const int SNAKE_LEN = 8;
+
+    const CRGB borderColor = CRGB(40, 40, 40);
+    const int bMinX = BOARD_OFFSET_X - 1;
+    const int bMaxX = BOARD_OFFSET_X + BOARD_SIZE;
+    const int bMinY = BOARD_OFFSET_Y - 1;
+    const int bMaxY = BOARD_OFFSET_Y + BOARD_SIZE;
+
+    for (int step = 0; ; step = (step + 1) % PERIM)
+    {
+        fill_solid(leds, NUM_LEDS, CRGB::Black);
+
+        // Board border
+        for (int x = bMinX; x <= bMaxX; x++) {
+            if (x >= 0 && x < WIDTH) {
+                if (bMinY >= 0 && bMinY < HEIGHT) leds[XY(x, bMinY)] = borderColor;
+                if (bMaxY >= 0 && bMaxY < HEIGHT) leds[XY(x, bMaxY)] = borderColor;
+            }
+        }
+        for (int y = bMinY; y <= bMaxY; y++) {
+            if (y >= 0 && y < HEIGHT) {
+                if (bMinX >= 0 && bMinX < WIDTH) leds[XY(bMinX, y)] = borderColor;
+                if (bMaxX >= 0 && bMaxX < WIDTH) leds[XY(bMaxX, y)] = borderColor;
+            }
+        }
+
+        // Opponent's board — myBoard=true reveals all ships
+        for (uint8_t y = 0; y < BOARD_SIZE; y++)
+            for (uint8_t x = 0; x < BOARD_SIZE; x++)
+                leds[XY(BOARD_OFFSET_X + x, BOARD_OFFSET_Y + y)] = cellColor(opponentBoard[y][x], true);
+
+        // Snake with fading tail
+        for (int s = 0; s < SNAKE_LEN; s++)
+        {
+            int pos = ((step - s) % PERIM + PERIM) % PERIM;
+            uint8_t brightness = (uint8_t)(255 - s * 255 / SNAKE_LEN);
+            leds[XY(px[pos], py[pos])] = CRGB(
+                (uint16_t)headColor.r * brightness / 255,
+                (uint16_t)headColor.g * brightness / 255,
+                (uint16_t)headColor.b * brightness / 255
+            );
+        }
+
+        FastLED.show();
+        delay(40);
+    }
+}

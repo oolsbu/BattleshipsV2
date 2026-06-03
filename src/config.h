@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 // Compile-time role selection: set to 1 for master, 0 for slave.
-#define ROLE_IS_MASTER 1
+#define ROLE_IS_MASTER 0
 
 const uint8_t SIZES[] = {4, 3, 2};
 const uint8_t COUNTS[] = {1, 2, 3};

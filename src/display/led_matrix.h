@@ -17,5 +17,6 @@ void ledSetup();
 int XY(int x, int y);
 void showFrame(const Cell frame[BOARD_SIZE][BOARD_SIZE], bool myBoard, bool showCursor = false, uint8_t cursorX = 0, uint8_t cursorY = 0,
                uint8_t previewLength = 0, bool previewHorizontal = true, bool previewValid = true);
+void showEndAnimation(bool won, const Cell opponentBoard[BOARD_SIZE][BOARD_SIZE]);
 
 #endif

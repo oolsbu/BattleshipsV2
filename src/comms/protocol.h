@@ -1,3 +1,4 @@
+#pragma once
 #include <stdint.h>
 
 enum MessageType : uint8_t
@@ -6,8 +7,11 @@ enum MessageType : uint8_t
     MSG_PLACEMENT_DONE,
     MSG_AIM,
     MSG_SHOOT,
-    MSG_GAME_STATE
+    MSG_GAME_STATE,
+    MSG_SHIP_REVEAL
 };
+
+#define MAX_SHIPS_IN_REVEAL 8
 
 constexpr uint8_t NO_SHOT = 0xFF;
 
@@ -74,4 +78,19 @@ struct __attribute__((packed)) GameStateMessage
 {
     MessageHeader header;
     GameStatePayload payload;
+};
+
+struct __attribute__((packed)) ShipRevealEntry
+{
+    uint8_t x;
+    uint8_t y;
+    uint8_t length;
+    uint8_t horizontal;
+};
+
+struct __attribute__((packed)) ShipRevealMessage
+{
+    MessageHeader header;
+    uint8_t count;
+    ShipRevealEntry ships[MAX_SHIPS_IN_REVEAL];
 };

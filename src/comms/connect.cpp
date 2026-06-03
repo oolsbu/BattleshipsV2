@@ -13,31 +13,92 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 
-bool sendRaw(const uint8_t *data, uint8_t len)
-{
-    return esp_now_send(other, data, len) == ESP_OK;
-}
+// Circular receive buffer — written by WiFi task, read by main task
+#define RECV_BUF_SLOTS 4
+static uint8_t recv_bufs[RECV_BUF_SLOTS][250];
+static uint8_t recv_lens[RECV_BUF_SLOTS];
+static volatile uint8_t recv_write = 0;
+static volatile uint8_t recv_read = 0;
 
-// Called when data is received
+// Send confirmation flags — written by WiFi task, polled by main task
+static volatile bool send_done = false;
+static volatile bool send_ok = false;
+
+// Buffer incoming data; dispatch happens in main task via processPendingMessages()
 static void onReceive(const uint8_t *mac, const uint8_t *incomingData, int len)
 {
-    if (len < static_cast<int>(sizeof(MessageHeader)))
-    {
+    if (len < 1 || len > 250)
         return;
-    }
-
-#if ROLE_IS_MASTER
-    masterRecievedMessage(const_cast<uint8_t *>(incomingData), static_cast<uint8_t>(len));
-#else
-    slaveRecievedMessage(const_cast<uint8_t *>(incomingData), static_cast<uint8_t>(len));
-#endif
+    uint8_t next = (recv_write + 1) % RECV_BUF_SLOTS;
+    if (next == recv_read)
+        return; // buffer full, drop packet
+    memcpy(recv_bufs[recv_write], incomingData, (size_t)len);
+    recv_lens[recv_write] = (uint8_t)len;
+    recv_write = next;
 }
 
-// Called when data is sent
 static void onSent(const uint8_t *mac, esp_now_send_status_t status)
 {
-    Serial.print("Send status: ");
-    Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "Fail");
+    send_ok = (status == ESP_NOW_SEND_SUCCESS);
+    send_done = true;
+}
+
+// Must be called from the main task only.
+// Blocks until link-layer ACK received, retrying up to MAX_RETRIES times.
+bool sendRaw(const uint8_t *data, uint8_t len)
+{
+    const int MAX_RETRIES = 3;
+    const unsigned long TIMEOUT_MS = 300;
+    const unsigned long RETRY_DELAY_MS = 100;
+
+    for (int attempt = 0; attempt < MAX_RETRIES; attempt++)
+    {
+        send_done = false;
+        send_ok = false;
+
+        if (esp_now_send(other, data, len) != ESP_OK)
+        {
+            delay(RETRY_DELAY_MS);
+            continue;
+        }
+
+        unsigned long start = millis();
+        while (!send_done && millis() - start < TIMEOUT_MS)
+        {
+            delay(1); // yield so WiFi task can fire onSent
+        }
+
+        if (send_ok)
+            return true;
+
+        Serial.printf("Send failed (attempt %d/%d)\n", attempt + 1, MAX_RETRIES);
+        if (attempt < MAX_RETRIES - 1)
+            delay(RETRY_DELAY_MS);
+    }
+
+    Serial.println("Send failed after all retries");
+    return false;
+}
+
+// Call from main loop to dispatch any buffered incoming messages.
+void processPendingMessages()
+{
+    while (recv_read != recv_write)
+    {
+        uint8_t data[250];
+        uint8_t len = recv_lens[recv_read];
+        memcpy(data, recv_bufs[recv_read], len);
+        recv_read = (recv_read + 1) % RECV_BUF_SLOTS;
+
+        if (len < (uint8_t)sizeof(MessageHeader))
+            continue;
+
+#if ROLE_IS_MASTER
+        masterRecievedMessage(data, len);
+#else
+        slaveRecievedMessage(data, len);
+#endif
+    }
 }
 
 void ESPNOW_setup()

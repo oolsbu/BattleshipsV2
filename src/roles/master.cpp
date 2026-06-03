@@ -8,6 +8,7 @@ static MasterGameState game_state;
 static bool slave_ready = false;
 static bool start_sent = false;
 static bool has_last_aim = false;
+static bool animation_done = false;
 static uint8_t last_aim_x = 0;
 static uint8_t last_aim_y = 0;
 
@@ -20,6 +21,22 @@ static bool sendAim(uint8_t x, uint8_t y)
     msg.payload.x = x;
     msg.payload.y = y;
     return sendRaw(reinterpret_cast<const uint8_t *>(&msg), sizeof(msg));
+}
+
+static void sendShipReveal()
+{
+    ShipRevealMessage msg = {};
+    msg.header.type = MSG_SHIP_REVEAL;
+    msg.count = SHIPS;
+    for (uint8_t i = 0; i < SHIPS; ++i)
+    {
+        const Ship &s = game_state.master_ships[i];
+        msg.ships[i].x = s.x;
+        msg.ships[i].y = s.y;
+        msg.ships[i].length = s.length;
+        msg.ships[i].horizontal = s.horizontal ? 1 : 0;
+    }
+    sendRaw(reinterpret_cast<const uint8_t *>(&msg), sizeof(msg));
 }
 
 static void sendGameState(uint8_t shooter, uint8_t x, uint8_t y, uint8_t result)
@@ -63,6 +80,7 @@ void masterSetup()
     slave_ready = false;
     start_sent = false;
     has_last_aim = false;
+    animation_done = false;
     for (uint8_t i = 0; i < SHIPS; ++i)
     {
         game_state.master_ships[i] = {};
@@ -151,12 +169,15 @@ void masterLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
     }
     break;
     case PHASE_WAITING:
-        if (slave_ready && !start_sent)
+        if (slave_ready)
         {
-            game_state.master_turn = true;
-            start_sent = true;
-            sendGameState(static_cast<uint8_t>(User::Master), 0, 0, NO_SHOT);
-            Serial.println("Start: master turn");
+            if (!start_sent)
+            {
+                game_state.master_turn = true;
+                start_sent = true;
+                sendGameState(static_cast<uint8_t>(User::Master), 0, 0, NO_SHOT);
+                Serial.println("Start: master turn");
+            }
             phase = PHASE_SHOOTING;
         }
         showFrame(game_state.master_board, true, false);
@@ -190,6 +211,8 @@ void masterLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
                 if (result != CELL_ALREADY_TARGETED)
                 {
                     game_state.slave_board[game_state.master_cursor_y][game_state.master_cursor_x] = result;
+                    showFrame(game_state.slave_board, false, false); // show result without cursor
+                    delay(1000);
                     game_state.master_turn = false;
                     sendGameState(static_cast<uint8_t>(User::Master), game_state.master_cursor_x, game_state.master_cursor_y, static_cast<uint8_t>(result));
                 }
@@ -203,9 +226,12 @@ void masterLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
         }
         break;
     case PHASE_WON:
-        // Serial.println((game_state.master_ships_left == 0) ? "Slave wins!" : "Master wins!");
-        // Optionally, reset the game or enter a different state
-        break;
+        if (!animation_done)
+        {
+            animation_done = true;
+            sendShipReveal();
+            showEndAnimation(game_state.slave_ships_left == 0, game_state.slave_board);
+        }
         break;
     }
 }
@@ -245,7 +271,7 @@ void masterRecievedMessage(uint8_t *incomingData, uint8_t len)
     }
     case MSG_PLACEMENT_DONE:
         slave_ready = true;
-        if (game_state.master_ships_to_place == 0)
+        if (game_state.master_ships_to_place == 0 && !start_sent)
         {
             game_state.master_turn = true;
             start_sent = true;

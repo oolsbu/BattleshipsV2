@@ -11,6 +11,8 @@ static bool has_last_aim = false;
 static uint8_t last_aim_x = 0;
 static uint8_t last_aim_y = 0;
 static unsigned long last_ready_ms = 0;
+static bool shot_pending = false; // waiting for game state response after sending MSG_SHOOT
+static bool animation_done = false;
 
 static bool sendAim(uint8_t x, uint8_t y)
 {
@@ -58,6 +60,8 @@ void slaveSetup()
     start_received = false;
     has_last_aim = false;
     last_ready_ms = 0;
+    shot_pending = false;
+    animation_done = false;
     for (uint8_t i = 0; i < SHIPS; ++i)
     {
         game_state.slave_ships[i] = {};
@@ -178,9 +182,10 @@ void slaveLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
                 phase = PHASE_PLACING;
                 return;
             }
-            if (btn)
+            if (btn && !shot_pending)
             {
                 sendShoot(game_state.slave_cursor_x, game_state.slave_cursor_y);
+                shot_pending = true;
             }
             showFrame(game_state.master_board, false, true, game_state.slave_cursor_x, game_state.slave_cursor_y);
         }
@@ -190,9 +195,11 @@ void slaveLoop(GamePhase &phase, int dx, int dy, int joyBtn, int btn)
         }
         break;
     case PHASE_WON:
-        // Serial.println((game_state.slave_ships_left == 0) ? "Slave wins!" : "slave wins!");
-        // Optionally, reset the game or enter a different state
-        break;
+        if (!animation_done)
+        {
+            animation_done = true;
+            showEndAnimation(game_state.master_ships_left == 0, game_state.master_board);
+        }
         break;
     }
 }
@@ -226,22 +233,48 @@ void slaveRecievedMessage(uint8_t *incomingData, uint8_t len)
         game_state.master_turn = msg->payload.master_turn != 0;
         game_state.master_ships_left = msg->payload.master_ships_left;
         game_state.slave_ships_left = msg->payload.slave_ships_left;
+        shot_pending = false;
         if (msg->payload.shot_result == NO_SHOT)
         {
             Serial.println("Start: master turn");
         }
         if (msg->payload.shot_result != NO_SHOT && msg->payload.shot_x < BOARD_SIZE && msg->payload.shot_y < BOARD_SIZE)
         {
+            Cell result = static_cast<Cell>(msg->payload.shot_result);
             if (msg->payload.shooter == static_cast<uint8_t>(User::Master))
             {
-                game_state.slave_board[msg->payload.shot_y][msg->payload.shot_x] = static_cast<Cell>(msg->payload.shot_result);
+                game_state.slave_board[msg->payload.shot_y][msg->payload.shot_x] = result;
+                // Master shot slave — show slave's board so slave sees where they were hit
+                showFrame(game_state.slave_board, true, false);
+                delay(1000);
             }
             else
             {
-                game_state.master_board[msg->payload.shot_y][msg->payload.shot_x] = static_cast<Cell>(msg->payload.shot_result);
+                game_state.master_board[msg->payload.shot_y][msg->payload.shot_x] = result;
+                // Slave shot master — show master's board so slave sees their shot result
+                showFrame(game_state.master_board, false, false);
+                delay(1000);
             }
         }
         start_received = true;
+        break;
+    }
+    case MSG_SHIP_REVEAL:
+    {
+        if (len < static_cast<uint8_t>(sizeof(ShipRevealMessage)))
+            return;
+        const ShipRevealMessage *msg = reinterpret_cast<const ShipRevealMessage *>(incomingData);
+        for (uint8_t i = 0; i < msg->count && i < MAX_SHIPS_IN_REVEAL; ++i)
+        {
+            const ShipRevealEntry &s = msg->ships[i];
+            for (uint8_t j = 0; j < s.length; ++j)
+            {
+                uint8_t sx = s.x + (s.horizontal ? j : 0);
+                uint8_t sy = s.y + (s.horizontal ? 0 : j);
+                if (sx < BOARD_SIZE && sy < BOARD_SIZE && game_state.master_board[sy][sx] == CELL_EMPTY)
+                    game_state.master_board[sy][sx] = CELL_SHIP;
+            }
+        }
         break;
     }
     default:

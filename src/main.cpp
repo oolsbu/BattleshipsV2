@@ -30,10 +30,12 @@ void setup()
 void loop()
 {
 #if ROLE_IS_MASTER
+  processPendingMessages();
   getReadings(x, y, joyBtn, btn);
   masterLoop(game_phase, x, y, joyBtn, btn);
   // Serial.printf("Master - Cursor: (%d, %d), JoyBtn: %d, Btn: %d, GamePhase: %d\n", x, y, joyBtn, btn, game_phase);
 #else
+  processPendingMessages();
   getReadings(x, y, joyBtn, btn);
   slaveLoop(game_phase, x, y, joyBtn, btn);
 #endif
